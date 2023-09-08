@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<launch>
+  <node name="self_drive_in_furrow" pkg="self_drive_in_furrow" type="self_drive_in_furrow" output="screen" >
+    <rosparam command="load" file="$(find self_drive_in_furrow)/config/parameters.yaml" />
+  </node>
+</launch>

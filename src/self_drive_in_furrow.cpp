@@ -1,217 +1,233 @@
 #include <ros/ros.h>
-#include <math.h>
-#include "std_msgs/String.h"
+#include <vector>
 #include "std_msgs/Bool.h"
-#include "std_msgs/Float32.h"
 #include "sensor_msgs/LaserScan.h"
+#include "geometry_msgs/Twist.h"
 
+using namespace std;
+
+
+///////////////////////////////////////////////////////////////////////////	var. declaration
 #define PI 3.141592
 
-bool ctrl_flag=false;						// control flag
-bool weed_flag;						// weeding flag
+std_msgs::Bool fur_flag;							// existance of furrow
+geometry_msgs::Twist cmd_vel;						// velocity command to be published
 
-float std_dev;							// standard deviation
+bool sub_flag=false;								// lidar data subscription flag
 
-float ldr_r[360];						// lidar ranges array
-int ldr_idx;							// lidar index
+float inf=1/0.0;									// infinite number
 
-int th_r=80;							// -80~80deg range
-int h_idx;							// height index
-float d_th;							// delta theta
-float h_c;							// center height
+vector<float> lidar;								// lidar ranges [m]
+vector<float> lidar_i;								// interpolated lidar ranges
+int l_num;											// number of elements of lidar ranges
 
-float pos_coef;						// position array
-float pos_sum;							// pos*height_norm sum
-float h_norm_sum;						// height_norm sum
-float pos;							// position(error)
+vector<float> height;								// height [m]
+int h_num;											// number of elements of height
 
-float p_gain=15;						// control p gain
-float ctrl_out;						// control output(gyration radius)
-float tread=0.12;						// tread
-float vel=5000.0;						// motor velocity
+float d_th;											// delta theta [deg]
 
-class publisher_subscriber					// class for pub, sub
+
+///////////////////////////////////////////////////////////////////////////	parameters
+float max_rng;										// lidar max range [m]
+
+int th_r;											// lidar data processing range [deg]
+
+float p_gain;										// control p gain
+
+float tread;										// robot tread [m]
+float vel;											// default velocity [rpm]
+
+
+///////////////////////////////////////////////////////////////////////////	sub, pub class
+class sub_pub
 {
-	public:						// public member declaration
-		publisher_subscriber()		// substitute topics to publisher & subscriber
+private:
+	ros::NodeHandle nh;
+	ros::Publisher fur_pub;
+	ros::Publisher vel_pub;
+	ros::Subscriber ldr_sub;
+
+public:
+	sub_pub()										// class constructor
+	{
+		fur_pub=nh.advertise<std_msgs::Bool>("fur_exi", 1);
+		vel_pub=nh.advertise<geometry_msgs::Twist>("vel_sel", 1);
+		ldr_sub=nh.subscribe("/scan", 10, &sub_pub::lidar_callback, this);
+		
+		nh.getParam("/self_drive_in_furrow/max_rng", max_rng);	// load parameters
+		nh.getParam("/self_drive_in_furrow/th_r", th_r);
+		nh.getParam("/self_drive_in_furrow/p_gain", p_gain);
+		nh.getParam("/self_drive_in_furrow/tread", tread);
+		nh.getParam("/self_drive_in_furrow/vel", vel);
+	}
+	
+	void furrow_publish()							// furrow existance publish func.
+	{
+		fur_pub.publish(fur_flag);
+	}
+	
+	void vel_publish()								// velocity command publish func.
+	{
+		vel_pub.publish(cmd_vel);
+	}
+	
+	void lidar_callback(const sensor_msgs::LaserScan::ConstPtr& msg)	// lidar call back func.
+	{
+		sub_flag=true;
+		
+		lidar.clear();
+		lidar=msg->ranges;
+		
+		l_num=lidar.size();
+		
+		for(int i=0; i<l_num; i++)
 		{
-			vel_l_pub=nh.advertise<std_msgs::Float32>("vel_l", 1);
-			vel_r_pub=nh.advertise<std_msgs::Float32>("vel_r", 1);
-			flag_pub=nh.advertise<std_msgs::String>("log", 1);
-			flag_sub=nh.subscribe("ctrl_flag", 1000, &publisher_subscriber::ctrl_flag_callback, this);
-			ldr_sub=nh.subscribe("scan", 1000, &publisher_subscriber::sub_callback, this);
+			if(lidar[i]==inf)
+				lidar[i]=max_rng;
 		}
-		
-		void ctrl_flag_callback(const std_msgs::Bool::ConstPtr& flag) // ctrl flag call back func.
-		{
-			if(flag->data==true)
-    			{
-    				ctrl_flag=!ctrl_flag;
-    				ROS_INFO("%s", ctrl_flag ? "true" : "false");
-    			}
-		}
-		
-		void sub_callback(const sensor_msgs::LaserScan::ConstPtr& topic)
-		{	
-			std_msgs::Float32 vel_l;			// Float32 data type var.
-			std_msgs::Float32 vel_r;			// Float32 data type var.
-			std_msgs::String weeding_flag;		// String data type var.
-									
-			for(int i=0; i<360; i++)			// substitute topic 
-			{
-				ldr_r[i]=0.0;
-				ldr_r[i]=((topic->ranges[i])<12.0) ? (topic->ranges[i]):(0.0);
-			}
-			
-			for(int i=359; i>0; i--)			// find lidar index num.
-			{
-				if((ldr_r[i]>0.1) && (ldr_r[i]<12.0))
-				{
-					ldr_idx=i;
-					break;
-				}
-			}
-			
-			interpolation(ldr_r, ldr_idx);		// interpolate lidar data
-			
-			d_th=360.0/ldr_idx;				// delta theta
-			h_idx=2*th_r*ldr_idx/360;			// height index
-			
-			float height[h_idx];				// height array
-			
-			for(int i=0; i<h_idx; i++)			// calculate height
-			{
-				height[i]=ldr_r[i+(ldr_idx-h_idx)/2]*cos((i*d_th-th_r)*PI/180);
-			}
-			
-			std_dev=std_deviation(height, h_idx);		// get standard deviation
-			
-			ROS_INFO("std deviation: %f", std_dev);
-			
-			if(std_dev>0.05)				// whether to weed or not
-			{
-				weed_flag=true;
-				weeding_flag.data="weeder operating";
-				ROS_INFO("weeder operating");
-			}
-			else
-			{
-				weed_flag=false;
-				weeding_flag.data="finished a row";
-				ROS_INFO("finished a row");
-			}
-			
-			flag_pub.publish(weeding_flag);		// publish weeding flag
-			
-			h_c=10*height[h_idx/2];			// center height
-			
-			normalization(height, h_idx);			// normalize height
-			
-			pos_sum=0.0;					// initialize sum var.
-			h_norm_sum=0.0;
-			
-			for(int i=0; i<h_idx; i++)
-			{
-				pos_coef=h_c*tan((i*d_th-th_r)*PI/180.0);
-				pos_sum+=pos_coef*height[i];
-				h_norm_sum+=height[i];
-			}
-			
-			pos=pos_sum/h_norm_sum;
-			
-			ROS_INFO("position: %f", pos);
-			
-			ctrl_out=1/(p_gain*pos);			// control output
-			
-			vel_l.data=(ctrl_out-tread)*vel/ctrl_out;	// left motor velocity
-    			vel_r.data=(ctrl_out+tread)*vel/ctrl_out;	// right motor velocity
-    			
-    			ROS_INFO("left: %f", vel_l.data);
-    			ROS_INFO("right: %f", vel_r.data);
-			
-			if((ctrl_flag==true) && (weed_flag==true))
-			{
-				vel_l_pub.publish(vel_l);		// publish the pos topic
-				vel_r_pub.publish(vel_r);		// publish the pos topic
-				ROS_INFO("sent command");
-			}
-		}
-		
-		void interpolation(float arr[], int idx)		// interpolation func.
-		{
-			arr[0]=((arr[idx]+arr[1])*0.5+arr[0])*0.5;
-		
-			for(int i=1; i<idx; i++)
-			{
-				arr[i]=((arr[i-1]+arr[i+1])*0.5+arr[i])*0.5;
-			}
-			
-			arr[idx]=((arr[idx-1]+arr[0])*0.5+arr[idx])*0.5;
-		}
-		
-		float std_deviation(float arr[], int idx)		// standard deviation func.
-		{
-			float mean=0.0;
-			float dev;
-			
-			for(int i=0; i<idx; i++)
-			{
-				mean+=arr[i];
-			}
-			
-			mean/=idx;					// find mean
-			
-			for(int i=0; i<idx; i++)
-			{
-				dev+=(arr[i]-mean)*(arr[i]-mean);
-			}
-			
-			dev=sqrt(dev/idx);				// find standard deviation
-			
-			return dev;
-		}
-		
-		void normalization(float arr[], int idx)		// normalization func.
-		{
-			float min=12.0;
-			float max=0.0;
-		
-			for(int i=0; i<=idx; i++)
-			{
-				if(arr[i]!=0)
-				{
-					min=(arr[i]<min) ? (arr[i]):(min);
-					max=(arr[i]>max) ? (arr[i]):(max);
-				}
-			}
-			
-			for(int i=0; i<=idx; i++)
-			{
-				arr[i]=100*(arr[i]-min)/(max-min);
-			}
-		}
-		
-	private:					// private member declaration
-	  	ros::NodeHandle nh; 			// declare node handle
-		ros::Publisher vel_l_pub;		// declare publisher
-		ros::Publisher vel_r_pub;
-		ros::Publisher flag_pub;
-  		ros::Subscriber ldr_sub;		// declare subscriber
-  		ros::Subscriber flag_sub;
+	}
 };
 
-int main(int argc, char **argv)			// main function
+
+///////////////////////////////////////////////////////////////////////////	interpolation func.
+void interpolation()
 {
-	ros::init(argc, argv, "self_drive_in_furrow");	// ros initialization
-	publisher_subscriber pub_sub;			// class object delaration
+	lidar_i.clear();
 	
-	ros::Rate loop_rate(10);			// set 10ms loop rate
-	
-	while(ros::ok())				// while loop
+	lidar_i.push_back(((lidar[l_num-1]+lidar[1])*0.5+lidar[0])*0.5);
+	for(int i=1; i<l_num-2; i++)
 	{
-		ros::spinOnce();			// run ros once 
+		lidar_i.push_back(((lidar[i-1]+lidar[i+1])*0.5+lidar[i])*0.5);
+	}
+	lidar_i.push_back(((lidar[l_num-2]+lidar[0])*0.5+lidar[l_num-1])*0.5);
+}
+
+
+///////////////////////////////////////////////////////////////////////////	std deviation func.
+float std_deviation()
+{
+	float mean=0.0;
+	float dev;
+
+	for(int i=0; i<h_num; i++)						// find mean
+	{
+		mean+=height[i];
+	}
+	mean/=h_num;
+
+	for(int i=0; i<h_num; i++)						// find standard deviation
+	{
+		dev+=(height[i]-mean)*(height[i]-mean);
+	}
+	dev=sqrt(dev/h_num);
+	
+	return dev;
+}
+
+
+///////////////////////////////////////////////////////////////////////////	furrow ex. func.
+bool furrow_existance()
+{
+	float std_dev;									// standard deviation
+	
+	interpolation();								// interpolate lidar ranges
+	
+	d_th=360.0/(float)l_num;						// delta theta
+	h_num=2*th_r/(int)d_th;							// number of elements of height
+	
+	height.clear();
+	for (int i=0; i<h_num; i++)
+	{
+		height.push_back(lidar_i[i+(l_num-h_num)/2]*cos(((float)i*d_th-(float)th_r)*PI/180.0));
+	}
+	
+	std_dev=std_deviation();						// get standard deviation of height
+	
+	if(std_dev>0.05)
+		return true;
+	else
+		return false;
+}
+
+
+///////////////////////////////////////////////////////////////////////////	normalization func.
+void normalization()
+{
+	float min=max_rng;
+	float max=0.0;
+	
+	for(int i=0; i<h_num; i++)						// find minimum & maximum value
+	{
+		if(height[i]!=0)
+		{
+			min=(height[i]<min) ? (height[i]):(min);
+			max=(height[i]>max) ? (height[i]):(max);
+		}
+	}
+	
+	for(int i=0; i<h_num; i++)						// normalize
+	{
+		height[i]=(height[i]-min)/(max-min);
+	}
+}
+
+
+///////////////////////////////////////////////////////////////////////////	control func.
+void self_drive_control()
+{
+	float pos_idx;
+	float h_p_sum=0.0;
+	float h_sum=0.0;
+	float pos;
+	float curv;
+	
+	normalization();								// normalize height data
+	
+	for(int i=0; i<h_num; i++)						// find position by centroid method
+	{
+		pos_idx=tan(((float)i*d_th-(float)th_r)*PI/180.0);
+		h_p_sum+=pos_idx*height[i];
+		h_sum+=height[i];
+	}
+	pos=h_p_sum/h_sum;
+	
+	curv=1/(p_gain*pos);							// find control output(curvature)
+	
+	cmd_vel.linear.x=vel;
+	cmd_vel.angular.z=vel/curv;
+}
+
+
+///////////////////////////////////////////////////////////////////////////	main func.
+int main(int argc, char **argv)
+{
+	ros::init(argc, argv, "self_drive_in_furrow");
+	sub_pub sp;
+	
+	ros::Rate loop_rate(5);
+	
+	fur_flag.data=false;							// initialize furrow existance flag
+	cmd_vel.linear.x=0;								// initialize velocity command
+	cmd_vel.linear.y=0;
+	cmd_vel.linear.z=0;
+	cmd_vel.angular.x=0;
+	cmd_vel.angular.y=0;
+	cmd_vel.angular.z=0;
+	
+	while(ros::ok())
+	{
+		ros::spinOnce();
 		
-		loop_rate.sleep();			// sleep to keep the loop rate
+		if(sub_flag==true)
+		{
+			fur_flag.data=furrow_existance();
+			self_drive_control();
+		}
+		
+		sp.furrow_publish();
+		sp.vel_publish();
+		
+		loop_rate.sleep();
 	}
 	
 	return 0;					
