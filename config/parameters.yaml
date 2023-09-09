@@ -1,6 +1,6 @@
 max_rng: 8.0                              # lidar max range [m]
 
-th_r: 80                                  # lidar data processing range [deg]
+th_r: 60                                  # lidar data processing range [deg]
 
 p_gain: 15                                # control p gain
 

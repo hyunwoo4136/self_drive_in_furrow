@@ -107,19 +107,19 @@ void interpolation()
 float std_deviation()
 {
 	float mean=0.0;
-	float dev;
+	float dev=0.0;
 
 	for(int i=0; i<h_num; i++)						// find mean
 	{
 		mean+=height[i];
 	}
-	mean/=h_num;
+	mean/=(float)h_num;
 
 	for(int i=0; i<h_num; i++)						// find standard deviation
 	{
 		dev+=(height[i]-mean)*(height[i]-mean);
 	}
-	dev=sqrt(dev/h_num);
+	dev=sqrt(dev/(float)h_num);
 	
 	return dev;
 }
@@ -133,7 +133,7 @@ bool furrow_existance()
 	interpolation();								// interpolate lidar ranges
 	
 	d_th=360.0/(float)l_num;						// delta theta
-	h_num=2*th_r/(int)d_th;							// number of elements of height
+	h_num=int(2.0*(float)th_r/d_th);				// number of elements of height
 	
 	height.clear();
 	for (int i=0; i<h_num; i++)
@@ -190,8 +190,8 @@ void self_drive_control()
 		h_sum+=height[i];
 	}
 	pos=h_p_sum/h_sum;
-	
-	curv=1/(p_gain*pos);							// find control output(curvature)
+
+	curv=1.0/(p_gain*pos);							// find control output(curvature)
 	
 	cmd_vel.linear.x=vel;
 	cmd_vel.angular.z=vel/curv;
