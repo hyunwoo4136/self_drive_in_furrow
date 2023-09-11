@@ -2,7 +2,8 @@ max_rng: 8.0                              # lidar max range [m]
 
 th_r: 60                                  # lidar data processing range [deg]
 
-p_gain: 15                                # control p gain
+std_dev_thr: 0.05                         # standard deviation threshold [m]
 
-tread: 0.149                              # robot tread [m]
+p_gain: 25                                # control p gain
+
 vel: 0.07                                 # default velocity [m/s]

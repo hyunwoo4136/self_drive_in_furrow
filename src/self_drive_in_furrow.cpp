@@ -32,9 +32,10 @@ float max_rng;										// lidar max range [m]
 
 int th_r;											// lidar data processing range [deg]
 
+float std_dev_thr;									// standard deviation threshold [m]
+
 float p_gain;										// control p gain
 
-float tread;										// robot tread [m]
 float vel;											// default velocity [rpm]
 
 
@@ -56,8 +57,8 @@ public:
 		
 		nh.getParam("/self_drive_in_furrow/max_rng", max_rng);	// load parameters
 		nh.getParam("/self_drive_in_furrow/th_r", th_r);
+		nh.getParam("/self_drive_in_furrow/std_dev_thr", std_dev_thr);
 		nh.getParam("/self_drive_in_furrow/p_gain", p_gain);
-		nh.getParam("/self_drive_in_furrow/tread", tread);
 		nh.getParam("/self_drive_in_furrow/vel", vel);
 	}
 	
@@ -143,7 +144,7 @@ bool furrow_existance()
 	
 	std_dev=std_deviation();						// get standard deviation of height
 	
-	if(std_dev>0.05)
+	if(std_dev>std_dev_thr)
 		return true;
 	else
 		return false;
