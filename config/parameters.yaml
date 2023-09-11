@@ -2,7 +2,7 @@ max_rng: 8.0                              # lidar max range [m]
 
 th_r: 60                                  # lidar data processing range [deg]
 
-std_dev_thr: 0.05                         # standard deviation threshold [m]
+std_dev_thr: 0.045                         # standard deviation threshold [m]
 
 p_gain: 25                                # control p gain
 
